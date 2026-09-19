@@ -2,8 +2,8 @@
 
 ## Unreleased
 
-- Form controls now get real labels: extraction resolves `aria-labelledby`, the associated `<label for>`, a wrapping `<label>`, then placeholder/title, then `name`/`id`. Plain `<label for>` login forms no longer drop out of the action space, which previously made their inputs invisible and untypeable (#1).
-- A successful type action now records a truthful outcome (`typed into "Username"; no visible page change`) instead of `no visible change`, so the stuck watcher and repeat-recovery no longer misread a filled field as a no-op; repeat-recovery also honors a next-best `done` verdict instead of executing it as an unknown action.
+- Form controls now resolve an accessible name (AccName 1.2 precedence: `aria-labelledby` refs, `aria-label`, all associated native labels via the `.labels` API, then placeholder and title). Plain `<label for>` login forms no longer drop out of the action space, which previously made their inputs invisible and untypeable (#1).
+- A successful type action now records a truthful outcome (`typed into "Username"; no visible page change`) instead of `no visible change`, so the stuck watcher no longer misreads a filled field as a no-op. Repeat recovery now keys off machine state (a repeated action whose only effect was the fill, or a genuine no-op) instead of matching the display string, and no longer terminates on a `done` alternate with negligible probability.
 
 - Public library entry: `import { navigate } from "@jkudish/jev-browser"` now works. The package root exports `navigate` and the `NavigateOptions`, `StepRecord`, `ConsoleEvent`, and `JevUsage` types side-effect free; the pre-existing `@jkudish/jev-browser/dist/navigate.js` deep import keeps working. The MCP server and CLI remain the `jev-browser` bin, and client configs are unchanged.
 - Model and provider are resolved per run instead of at import time, so importing the library has no configuration side effects and concurrent runs report their own provider and model, never another run's.

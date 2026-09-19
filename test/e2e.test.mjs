@@ -147,12 +147,14 @@ test("label-for inputs appear in the action space and can be typed into", { skip
       );
       const body = payload(result);
       // The username input is the only typeable element (password fields are
-      // excluded by design), so any executed type action proves the fix.
+      // excluded by design), so any executed type action proves the fix; the
+      // outcome naming the label[for] text (not the id/name) pins resolution.
       const typed = body.steps.find((s) => /^type_/.test(s.executed_action ?? "") && !s.action_error);
       assert.ok(typed, `no type action executed: ${JSON.stringify(body.steps.map((s) => [s.proposed_action, s.executed_action]))}`);
+      assert.match(typed.outcome ?? "", /typed into "Username"/);
       assert.ok(["done", "goal_achieved"].includes(body.status), `status was ${body.status}`);
     });
   } finally {
-    server.close();
+    await new Promise((resolve) => server.close(resolve));
   }
 });
