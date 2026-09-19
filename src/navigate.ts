@@ -217,12 +217,34 @@ async function extractAndStamp(page: Page, bounded: (cap: number) => number): Pr
         const tag = el.tagName.toLowerCase();
         const roleAttr = el.getAttribute("role") || "";
         const typeAttr = (el.getAttribute("type") || "").toLowerCase();
+        // Form controls are void elements: innerText is always empty. Resolve
+        // their accessible name the way browsers do, or plain <label for> forms
+        // (the most common login markup) drop out of the action space entirely.
+        const labelFor = (el: HTMLElement): string => {
+          const id = el.getAttribute("id");
+          if (id) {
+            const lab = document.querySelector(`label[for="${CSS.escape(id)}"]`);
+            if (lab?.textContent?.trim()) return lab.textContent;
+          }
+          const wrapping = el.closest("label");
+          if (wrapping?.textContent?.trim()) return wrapping.textContent;
+          const labelledby = el.getAttribute("aria-labelledby");
+          if (labelledby) {
+            return labelledby
+              .split(/\s+/)
+              .map((ref) => document.getElementById(ref)?.textContent ?? "")
+              .join(" ");
+          }
+          return "";
+        };
         const label = (
           el.getAttribute("aria-label") ||
+          labelFor(el) ||
           el.getAttribute("placeholder") ||
           el.getAttribute("title") ||
           el.innerText ||
           el.textContent ||
+          (["input", "textarea", "select"].includes(tag) ? el.getAttribute("name") || el.getAttribute("id") : "") ||
           ""
         )
           .replace(/\s+/g, " ")
@@ -451,6 +473,18 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
       let recoveryReason: string | undefined;
       if (lastExecuted === proposed && lastOutcome === "no visible change") {
         const alternate = pickAlternate(probabilities, new Set([proposed]));
+        if (alternate === "done") {
+          // The model's next-best option is stopping; honor it instead of
+          // executing "done" as an unknown action.
+          steps.push({
+            ...base,
+            executed_action: null,
+            detail: "repeated action had no effect; next-best option was done",
+            outcome: "agent switched to done after a repeated no-effect action",
+          });
+          status = "done";
+          break;
+        }
         if (alternate) {
           chosen = alternate;
           recoveryReason = "repeated action had no effect; switched to next-best option";
@@ -463,6 +497,7 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
 
       let detail = chosen;
       let actionError: string | undefined;
+      let typedIntoLabel: string | null = null;
       try {
         if (chosen === "back") {
           const wentBack = await page.goBack({ waitUntil: "domcontentloaded", timeout: bounded(10_000) }).catch(() => null);
@@ -483,6 +518,7 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
             await page.fill(selectorFor(element), generated.text, { timeout: bounded(4_000) });
             await page.press(selectorFor(element), "Enter", { timeout: bounded(4_000) });
             detail = `typed "${generated.text}" via ${generated.via}`;
+            typedIntoLabel = element.description.match(/"([^"]*)"/)?.[1] ?? element.kind;
           }
         } else if (chosen.startsWith("select_")) {
           const opts = element.options ?? [];
@@ -529,7 +565,12 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
               ? "page content changed"
               : Math.abs(after.scrollY - observables.scrollY) > 40
                 ? "scrolled"
-                : "no visible change";
+                : typedIntoLabel !== null
+                  ? // A fill is a real effect even when nothing navigates: the
+                    // field now holds text. Say so, or the stuck watcher and
+                    // repeat-recovery both misread a successful type as a no-op.
+                    `typed into "${typedIntoLabel}"; no visible page change`
+                  : "no visible change";
 
       lastExecuted = chosen;
       lastOutcome = outcome;
