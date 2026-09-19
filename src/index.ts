@@ -6,8 +6,26 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { navigate } from "./navigate.js";
 import { runCli } from "./cli.js";
+
+// Auto-load .env from cwd or package directory
+try {
+  if (typeof process.loadEnvFile === "function") {
+    const cwdEnv = path.resolve(process.cwd(), ".env");
+    if (fs.existsSync(cwdEnv)) {
+      process.loadEnvFile(cwdEnv);
+    } else {
+      const pkgEnv = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../.env");
+      if (fs.existsSync(pkgEnv)) {
+        process.loadEnvFile(pkgEnv);
+      }
+    }
+  }
+} catch {}
 
 if (process.argv[2] === "run") {
   process.exit(await runCli(process.argv.slice(3)));

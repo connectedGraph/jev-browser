@@ -40,6 +40,9 @@ function parseArgs(argv: string[]): CliArgs {
       case "--record":
         args.recordPath = argv[++i];
         break;
+      case "--chrome":
+        process.env.JEV_BROWSER_USE_CHROME = "1";
+        break;
       case "--help":
       case "-h":
         args.help = true;

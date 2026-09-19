@@ -3,6 +3,7 @@
 // execution, the deadline is a real AbortSignal threaded through Jev, the
 // typing generator, and every Playwright timeout, usage is per-run, and the
 // final payload/screenshot extraction is best-effort.
+import fs from "node:fs";
 import { chromium, type Browser, type Page } from "playwright";
 import { generateText } from "ai";
 import { createOpenAI } from "@ai-sdk/openai";
@@ -202,7 +203,7 @@ async function extractAndStamp(page: Page, bounded: (cap: number) => number): Pr
       // selectors match more than one element.
       document.querySelectorAll("[data-jev-id]").forEach((el) => el.removeAttribute("data-jev-id"));
       const SEL =
-        'a[href], button, input, textarea, select, [role="button"], [role="link"], [role="searchbox"], [role="textbox"]';
+        'a[href], button, input, textarea, select, summary, [role="button"], [role="link"], [role="menuitem"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="option"], [role="tab"], [role="searchbox"], [role="textbox"]';
       const out: any[] = [];
       for (const el of document.querySelectorAll(SEL) as NodeListOf<HTMLElement>) {
         // Cap accepted candidates AFTER filtering so hidden boilerplate at the
@@ -227,8 +228,8 @@ async function extractAndStamp(page: Page, bounded: (cap: number) => number): Pr
           .trim();
         const href = tag === "a" ? el.getAttribute("href") || "" : "";
         const clickable =
-          ["a", "button"].includes(tag) ||
-          ["button", "link"].includes(roleAttr) ||
+          ["a", "button", "summary"].includes(tag) ||
+          ["button", "link", "menuitem", "menuitemradio", "menuitemcheckbox", "option", "tab"].includes(roleAttr) ||
           ["submit", "button", "checkbox", "radio"].includes(typeAttr);
         const typeable =
           tag === "textarea" ||
@@ -359,7 +360,38 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
   };
 
   try {
-    browser = await chromium.launch({ headless: process.env.JEV_BROWSER_HEADED !== "1" });
+    const proxyServer = process.env.HTTPS_PROXY || process.env.HTTP_PROXY;
+    const findChrome = () => {
+      const explicit = process.env.JEV_BROWSER_CHROME_PATH || process.env.CHROME_PATH;
+      if (explicit && fs.existsSync(explicit)) return explicit;
+      if (process.env.JEV_BROWSER_USE_CHROME === "1" || process.env.USE_CHROME === "1") {
+        const paths = [
+          process.env.LOCALAPPDATA ? `${process.env.LOCALAPPDATA}\\Google\\Chrome\\Application\\chrome.exe` : "",
+          "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+          "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+          "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+          "/usr/bin/google-chrome",
+          "/usr/bin/chromium",
+          "/usr/bin/chromium-browser",
+        ];
+        for (const p of paths) {
+          if (p && fs.existsSync(p)) return p;
+        }
+      }
+      return undefined;
+    };
+    const chromeExe = findChrome();
+    const launchOptions: Record<string, any> = {
+      headless: process.env.JEV_BROWSER_HEADED !== "1",
+      args: ["--disable-blink-features=AutomationControlled"],
+    };
+    if (chromeExe) {
+      launchOptions.executablePath = chromeExe;
+    }
+    if (proxyServer) {
+      launchOptions.proxy = { server: proxyServer };
+    }
+    browser = await chromium.launch(launchOptions);
     const context = await browser.newContext({
       viewport: { width: 1024, height: 640 },
       ...(options.recordDir ? { recordVideo: { dir: options.recordDir } } : {}),
@@ -492,7 +524,17 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
             detail = `selected "${label}"`;
           }
         } else {
-          await page.click(selectorFor(element), { timeout: bounded(4_000) });
+          const sel = selectorFor(element);
+          try {
+            await page.click(sel, { timeout: bounded(3_000) });
+          } catch {
+            // Fallback for detached or obscured elements: synthetic DOM click
+            await page.$eval(sel, (el: any) => {
+              if (typeof el.click === "function") el.click();
+              const anchor = el.tagName === "A" ? el : el.closest?.("a");
+              if (anchor && anchor !== el) anchor.click();
+            }).catch(() => {});
+          }
           detail = element.description;
         }
       } catch (error) {
@@ -517,7 +559,7 @@ export async function navigate(options: NavigateOptions, externalSignal?: AbortS
           ? `navigated to ${after.url}`
           : after.title !== observables.title
             ? `page changed: "${after.title}"`
-            : Math.abs(after.textLength - observables.textLength) > 50
+            : Math.abs(after.textLength - observables.textLength) > 10 || after.excerpt !== observables.excerpt
               ? "page content changed"
               : Math.abs(after.scrollY - observables.scrollY) > 40
                 ? "scrolled"
