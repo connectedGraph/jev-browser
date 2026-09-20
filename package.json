@@ -7,7 +7,7 @@
   "author": "Joey Kudish",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/jkudish/jev-browser.git"
+    "url": "git+https://github.com/connectedGraph/jev-browser.git"
   },
   "bin": {
     "jev-browser": "dist/index.js"
